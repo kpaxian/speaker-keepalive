@@ -1,10 +1,14 @@
-# Milestone 1 session tickets
+# Session tickets
 
 Source of truth: [speaker-keepalive-spec.md](../../speaker-keepalive-spec.md).
 This is the accepted Milestone 1 plan, saved for independent implementation
 sessions. Implement one ticket per session, in order. Read the specification,
 this index, and the predecessor handoff before editing. An unfinished ticket
 continues in the next session; do not bypass its acceptance criteria.
+
+After user-observed pulse success, the user authorized SK-07 as a narrow
+exception to the original order: prepare a login service while remaining SK-06
+measurements stay open. Other later-milestone features remain deferred.
 
 | Ticket | Deliverable | Status | Prerequisite |
 | --- | --- | --- | --- |
@@ -13,7 +17,8 @@ continues in the next session; do not bypass its acceptance criteria.
 | [SK-03](SK-03.md) | Periodic pulse runtime | Complete | SK-02 complete |
 | [SK-04](SK-04.md) | Continuous digital silence | Complete | SK-03 complete |
 | [SK-05](SK-05.md) | Release checks and experiment handoff | Complete | SK-04 complete |
-| [SK-06](SK-06.md) | User-led physical validation | Awaiting user observation | SK-05 complete; user observation |
+| [SK-06](SK-06.md) | User-led physical validation | In progress: pulse success reported; measurements pending | SK-05 complete; user observation |
+| [SK-07](SK-07.md) | Minimal start-at-login user service | Implemented; desktop checks pending | User-authorized plan after pulse trial |
 
 ## Fixed implementation decisions
 
@@ -25,7 +30,8 @@ continues in the next session; do not bypass its acceptance criteria.
 - Cache pulses in memory; continuous silence reuses a bounded zero buffer.
   Apply amplitude once in samples and retain unity backend stream volume.
 - Use the system default output. Device selection/discovery, config files,
-  playback activity detection, status, and systemd integration are deferred.
+  playback activity detection, and status are deferred. The minimal user service
+  is authorized separately in SK-07.
 - Keep the specification's defaults and input bounds. Do not adjust audio
   configuration, change output volume, or increase amplitude automatically.
 - Tests must use fake backends and must not unexpectedly play physical audio.

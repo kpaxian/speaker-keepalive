@@ -1,7 +1,11 @@
 # Hardware validation worksheet — SK-06
 
-**Result: pending.** Software checks do not establish delivery, inaudibility,
-speaker power state, or resource use. Fill this in from actual observations.
+**Result: default pulse feasibility supported by user observation.** The user
+reported 1650.000 seconds (27½ minutes) with the JBL still on, confirmed this
+exceeded its usual idle timeout from personal experience, reported no artifacts,
+and described resource use as visually negligible. The parent stopped after
+Ctrl+C. Exact measurements, route inspection, and child cleanup remain pending.
+Software checks alone do not establish these physical results.
 Follow the [README procedure](../README.md#physical-experiment-procedure).
 Run only one keepalive instance, with the JBL selected as default output, and
 stop before changing outputs. Commands below are for the user-led session;
@@ -20,7 +24,7 @@ creating this worksheet did not run them against a physical speaker.
 | JBL sink name and default-output confirmation | Pending |
 | System/speaker volume and mute state (keep constant across trials) | Pending |
 | YouTube workaround and other playback stopped | Pending |
-| Baseline start / shutdown time / elapsed duration | Pending |
+| Baseline start / shutdown time / elapsed duration | User confirms usual timeout is shorter than 27½ minutes; no timed baseline recorded |
 | Baseline repetitions or “did not shut down within…” | Pending |
 | Planned trial duration and margin beyond baseline | Pending |
 
@@ -79,7 +83,7 @@ Keep interval 30 s and frequency 100 Hz while following the prescribed sequence.
 
 | Trial | Mode | Duration ms | PCM amplitude | Start/end, elapsed | JBL stayed on? | Audible artifacts / comfort | Route and cleanup evidence | Result |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Default | pulse | 300 | 0.0005 | Pending | Pending | Pending | Pending | Pending |
+| Default | pulse | 300 | 0.0005 | At least 1650 s reported; timestamps unrecorded | Yes, user reported | No artifacts reported | Parent stopped; route/child inspection pending | User-observed success beyond usual timeout |
 | If default ineffective | pulse | 500 | 0.0005 | Pending | Pending | Pending | Pending | Not run |
 | If still ineffective | pulse | 500 | 0.001 | Pending | Pending | Pending | Pending | Not run |
 | If still ineffective | pulse | 500 | 0.002 | Pending | Pending | Pending | Pending | Not run |
@@ -206,13 +210,13 @@ results. Retain measurement resolution and raw output with the observations;
 
 | Question | Recorded answer |
 | --- | --- |
-| Which mode/settings kept the JBL awake for the required window? | Pending |
-| Was the signal practically inaudible and acceptable? | Pending |
-| Did Ctrl+C leave no playback child? | Pending |
-| Parent and child/backend resource measurements complete? | Pending |
+| Which mode/settings kept the JBL awake for the required window? | Default pulse run, at least 27½ minutes; longer than usual timeout per user |
+| Was the signal practically inaudible and acceptable? | No audible artifacts reported; user considers trial passed |
+| Did Ctrl+C leave no playback child? | Parent stopped per user; playback child not independently checked |
+| Parent and child/backend resource measurements complete? | No; user described process-list use as negligible, exact CPU/RSS and backend costs unmeasured |
 | Any inconclusive trial / remaining investigation? | Pending |
-| User-confirmed Milestone 1 outcome | Pending |
-| Explicit authorization for a later milestone | Not given |
+| User-confirmed Milestone 1 outcome | Pulse feasibility accepted; formal measurement/inspection items remain open |
+| Explicit authorization for a later milestone | User approved and requested implementation of SK-07 minimal login service; other later scope not authorized |
 
 If only silence works, report that outcome and propose it as the operating mode.
 If both work, retain pulse mode as preferred and compare measured resource use.

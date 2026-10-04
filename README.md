@@ -5,10 +5,11 @@ Fedora with PipeWire. See [the specification](speaker-keepalive-spec.md) for the
 requirements and [the session tickets](docs/tickets/README.md) for implementation
 order and handoffs.
 
-**Current status: SK-05 software/release checks complete.** One-shot `test`,
-periodic pulse `run`, and continuous `run --mode silence` are implemented.
-Milestone 1 remains incomplete until the user-led hardware and resource checks
-in [the validation worksheet](docs/hardware-validation.md) are recorded.
+**Current status: default pulses worked in the user's JBL trial for at least
+27½ minutes**, exceeding its usual idle timeout, with no reported artifacts.
+Exact resource measurements and playback-child cleanup remain unverified in
+[the worksheet](docs/hardware-validation.md). A user-service file and setup
+instructions are now available below; installation and activation are separate.
 
 ## Build and check
 
@@ -38,6 +39,98 @@ Direct dependencies are pinned to versions verified with Rust 1.82:
 
 There is no async runtime or runtime network access. Python is a test dependency
 only; the built utility does not invoke Python. Tests need no PipeWire session.
+
+## Start automatically at login
+
+The [user-service file](systemd/speaker-keepalive.service) runs the existing
+pulse defaults: every 30 seconds, 300 ms, 100 Hz, amplitude 0.0005. It uses the
+current default output, including desktop speakers before the JBL connects.
+After connecting the JBL, select it as the default output for subsequent pulses.
+There is no device detection or automatic Bluetooth connection.
+
+The service starts with the systemd user session at login. No root access or
+lingering setup is needed. Existing lingering settings are left alone; if you
+already enabled lingering, the user manager may also run outside a login session.
+
+### Install the files
+
+Run from the project directory. First stop any foreground keepalive with Ctrl+C;
+check for duplicates with `pgrep -af '[s]peaker-keepalive run'`. For an upgrade,
+stop the existing service with `systemctl --user stop speaker-keepalive.service`
+before replacing its executable. Do not run both a foreground instance and the
+service. These installation commands copy files but do not start playback:
+
+```bash
+cargo build --release --locked
+install -D -b -m 0755 target/release/speaker-keepalive "$HOME/.local/bin/speaker-keepalive"
+install -D -b -m 0644 systemd/speaker-keepalive.service "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/speaker-keepalive.service"
+systemd-analyze --user verify "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/speaker-keepalive.service"
+systemctl --user daemon-reload
+```
+
+Stop and resolve errors before continuing. `install -b` preserves overwritten
+files with a `~` suffix; preserve any older backup separately before another
+upgrade. The service uses `%h/.local/bin/speaker-keepalive`, independent of this
+checkout or its build directory. The existing local-cache build alternative is
+recorded in the [SK-05 handoff](docs/tickets/SK-05.md).
+
+### Activate and inspect
+
+This explicitly starts playback now and enables future login startup:
+
+```bash
+systemctl --user enable --now speaker-keepalive.service
+systemctl --user status speaker-keepalive.service
+journalctl --user -u speaker-keepalive.service -n 50 --no-pager
+```
+
+Check that status reports `active (running)`. Normal successful operation is
+quiet, so an absence of pulse log messages is expected. To follow errors live:
+
+```bash
+journalctl --user -u speaker-keepalive.service -f
+```
+
+Ctrl+C here stops the log viewer, not the service. The service restarts after
+unexpected process failure with a ten-second delay. The application handles
+transient audio errors on its existing pulse schedule; it does not require
+PipeWire to be ready at a particular login ordering point.
+
+### Stop, disable, and verify
+
+To stop for the current session (leaving future startup enabled):
+
+```bash
+systemctl --user stop speaker-keepalive.service
+```
+
+To stop and also disable automatic startup:
+
+```bash
+systemctl --user disable --now speaker-keepalive.service
+systemctl --user is-active speaker-keepalive.service
+systemctl --user is-enabled speaker-keepalive.service
+```
+
+After disabling, expect `inactive` and `disabled`; those checks return nonzero
+for those states. Stopping sends SIGINT to the main process so its existing
+handler terminates/reaps playback. Systemd forcibly cleans up remaining service
+processes if necessary, with a five-second stop timeout. Confirm the service
+and its tagged playback child are gone:
+
+```bash
+pgrep -af '[s]peaker-keepalive run'
+pgrep -af '[p]w-play.*application.id.*speaker-keepalive'
+```
+
+With no other instance running, neither should print a process. To remove the
+setup entirely, disable it first, remove the installed unit and executable,
+then run `systemctl --user daemon-reload` again.
+
+After enabling, log out and back in when convenient and verify `active (running)`
+again. Actual login startup, systemd restart after failure, and live child
+cleanup remain pending desktop-session checks; they are not established by the
+fake-backend tests. See [SK-07](docs/tickets/SK-07.md) for verification limits.
 
 ## CLI contract
 
@@ -236,12 +329,14 @@ Stop the experiment before changing outputs. Startup latency may consume part
 of a short pulse; successful writes/process exits do not prove full delivery or
 keepalive effectiveness. No calibration or power-state detection is performed.
 
-No physical result or live resource measurement has been established. Near-zero
-idle CPU and roughly 10–20 MB parent RSS are goals to measure, and audio children,
-PipeWire, codecs, and Bluetooth add overhead. **Stop after Milestone 1:** do not
-start Milestone 2 until the user reports the physical result and explicitly
-authorizes continuation.
+The user reported that default pulses kept the JBL on beyond its usual timeout,
+with no reported artifacts and visually negligible resource use. Exact CPU/RSS
+and child/backend overhead remain unmeasured. Near-zero idle CPU and roughly
+10–20 MB parent RSS remain goals, not numerical results. The user authorized
+bringing forward the minimal login service in SK-07; further milestones still
+require explicit authorization.
 
 The [SK-05 handoff](docs/tickets/SK-05.md) records the release checks and complete
 Milestone 1 requirement review. Configuration files, device discovery, activity
-detection, status, and systemd integration remain outside this release.
+detection, and a status CLI remain deferred. The minimal user service above is
+the separately authorized SK-07 addition.
