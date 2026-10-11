@@ -327,3 +327,44 @@ fn repeating_input_rejects_empty_buffers_and_unexpected_success_exit() {
     }
     fixture.assert_reaped();
 }
+
+#[test]
+fn generated_input_bounds_stalls_diagnostics_and_early_exits() {
+    for case in ["stall", "flood-stall", "early-exit"] {
+        let fixture = Fixture::new(case);
+        let mut bounds = limits();
+        bounds.timeout = None;
+        let mut buffer = [0; 16384];
+        let mut generator = crate::audio::ToneParameters::new(100.0, 0.0005)
+            .unwrap()
+            .generator();
+        let started = Instant::now();
+        let error = process::execute_input(
+            &mut Command::new(&fixture.program),
+            Some(process::Input::Generated {
+                buffer: &mut buffer,
+                refill: &mut |bytes| generator.fill_pcm(bytes),
+                progress: &mut || {},
+            }),
+            false,
+            &Cancellation::default(),
+            bounds,
+        )
+        .unwrap_err();
+        if case == "early-exit" {
+            assert!(
+                matches!(
+                    error.kind(),
+                    io::ErrorKind::UnexpectedEof | io::ErrorKind::BrokenPipe
+                ),
+                "{error}"
+            );
+        } else {
+            assert_eq!(error.kind(), io::ErrorKind::TimedOut, "{error}");
+            assert!(error.to_string().contains("no progress"));
+        }
+        assert!(error.to_string().len() < 8400);
+        assert!(started.elapsed() < Duration::from_secs(2));
+        fixture.assert_reaped();
+    }
+}

@@ -1,9 +1,9 @@
 [Unit]
-Description=Speaker keepalive pulses on the default audio output
+Description=Speaker keepalive continuous quiet tone on the default audio output
 
 [Service]
 Type=simple
-ExecStart="%h/.local/bin/speaker-keepalive" run
+ExecStart="%h/.local/bin/speaker-keepalive" run --mode tone --frequency 100 --volume 0.0005
 Restart=on-failure
 RestartSec=10s
 KillSignal=SIGINT

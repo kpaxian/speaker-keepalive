@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use clap::{error::ErrorKind, Args, Parser, Subcommand, ValueEnum};
 
-use crate::audio::{PulseParameters, DEFAULT_AMPLITUDE, DEFAULT_DURATION_MS, DEFAULT_FREQUENCY_HZ};
+use crate::audio::{
+    PulseParameters, ToneParameters, DEFAULT_AMPLITUDE, DEFAULT_DURATION_MS, DEFAULT_FREQUENCY_HZ,
+};
 
 const DEFAULT_INTERVAL_SECONDS: u64 = 30;
 
@@ -12,7 +14,7 @@ const DEFAULT_INTERVAL_SECONDS: u64 = 30;
     about = "Experimental Bluetooth speaker keepalive for PipeWire"
 )]
 pub struct Cli {
-    /// Show pulse/result diagnostics
+    /// Show playback parameters, results, and stream diagnostics
     #[arg(long, global = true)]
     pub verbose: bool,
     #[command(subcommand)]
@@ -21,7 +23,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Run periodic pulses or continuous digital silence until interrupted
+    /// Run periodic pulses, a continuous tone, or digital silence until interrupted
     Run {
         #[arg(long, value_enum, default_value_t = Mode::Pulse)]
         mode: Mode,
@@ -42,6 +44,7 @@ enum Command {
 enum Mode {
     Pulse,
     Silence,
+    Tone,
 }
 
 #[derive(Debug, Args)]
@@ -77,11 +80,29 @@ pub enum Operation {
         signal: PulseParameters,
     },
     RunSilence,
+    RunTone(ToneParameters),
 }
 
 impl Cli {
     pub fn into_operation(self) -> Result<Operation, clap::Error> {
         match self.command {
+            Command::Run {
+                mode: Mode::Tone,
+                interval,
+                signal,
+            } => {
+                if interval.is_some() || signal.duration.is_some() {
+                    return Err(clap::Error::raw(ErrorKind::ArgumentConflict,
+                        "--mode tone cannot be combined with --interval or --duration; tone streams continuously"));
+                }
+                Ok(Operation::RunTone(
+                    ToneParameters::new(
+                        signal.frequency.unwrap_or(DEFAULT_FREQUENCY_HZ),
+                        signal.volume.unwrap_or(DEFAULT_AMPLITUDE),
+                    )
+                    .map_err(|message| clap::Error::raw(ErrorKind::ValueValidation, message))?,
+                ))
+            }
             Command::Test { signal } => Ok(Operation::Test(signal.resolve()?)),
             Command::Run {
                 mode: Mode::Silence,
@@ -139,6 +160,53 @@ mod tests {
     #[test]
     fn cli_definition_is_consistent() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn tone_defaults_overrides_and_conflicts_are_validated() {
+        assert_eq!(
+            parse(&["run", "--mode", "tone"]).unwrap(),
+            Operation::RunTone(ToneParameters::new(100.0, 0.0005).unwrap())
+        );
+        for (frequency, amplitude) in [("20", "0"), ("1000", "0.05"), ("137.25", "0.001")] {
+            assert_eq!(
+                parse(&[
+                    "run",
+                    "--mode",
+                    "tone",
+                    "--frequency",
+                    frequency,
+                    "--volume",
+                    amplitude
+                ])
+                .unwrap(),
+                Operation::RunTone(
+                    ToneParameters::new(frequency.parse().unwrap(), amplitude.parse().unwrap())
+                        .unwrap()
+                )
+            );
+        }
+        for (flag, value) in [("--interval", "30"), ("--duration", "300")] {
+            assert_eq!(
+                parse(&["run", "--mode", "tone", flag, value])
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::ArgumentConflict
+            );
+        }
+        for (flag, values) in [
+            ("--frequency", &["19", "1001", "NaN", "inf", "-inf"][..]),
+            ("--volume", &["-0.001", "0.051", "NaN", "inf", "-inf"][..]),
+        ] {
+            for value in values {
+                assert_eq!(
+                    parse(&["run", "--mode", "tone", flag, value])
+                        .unwrap_err()
+                        .kind(),
+                    ErrorKind::ValueValidation
+                );
+            }
+        }
     }
 
     #[test]

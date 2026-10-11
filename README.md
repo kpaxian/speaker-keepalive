@@ -5,11 +5,12 @@ Fedora with PipeWire. See [the specification](speaker-keepalive-spec.md) for the
 requirements and [the session tickets](docs/tickets/README.md) for implementation
 order and handoffs.
 
-**Current status: default pulses worked in the user's JBL trial for at least
-27½ minutes**, exceeding its usual idle timeout, with no reported artifacts.
-Exact resource measurements and playback-child cleanup remain unverified in
-[the worksheet](docs/hardware-validation.md). A user-service file and setup
-instructions are now available below; installation and activation are separate.
+**Current status: continuous quiet-tone trial.** The earlier default-pulse trial
+kept the JBL on for at least 27½ minutes, but the user subsequently reported
+shutdowns without a clear pattern. The login service now selects a continuous
+100 Hz tone at PCM amplitude 0.0005; plain `run` still selects pulses. Continuous
+tone effectiveness remains unverified until the user observes the speaker.
+See [the worksheet](docs/hardware-validation.md) and [SK-08](docs/tickets/SK-08.md).
 
 ## Build and check
 
@@ -42,10 +43,11 @@ only; the built utility does not invoke Python. Tests need no PipeWire session.
 
 ## Start automatically at login
 
-The [user-service file](systemd/speaker-keepalive.service) runs the existing
-pulse defaults: every 30 seconds, 300 ms, 100 Hz, amplitude 0.0005. It uses the
+The [user-service file](systemd/speaker-keepalive.service) runs
+`run --mode tone --frequency 100 --volume 0.0005`: a persistent quiet sine stream. It uses the
 current default output, including desktop speakers before the JBL connects.
-After connecting the JBL, select it as the default output for subsequent pulses.
+After connecting the JBL, select it as the default output, then restart this service so the persistent
+stream opens on that output. Confirm the actual stream route before the trial.
 There is no device detection or automatic Bluetooth connection.
 
 The service starts with the systemd user session at login. No root access or
@@ -85,7 +87,7 @@ journalctl --user -u speaker-keepalive.service -n 50 --no-pager
 ```
 
 Check that status reports `active (running)`. Normal successful operation is
-quiet, so an absence of pulse log messages is expected. To follow errors live:
+quiet, so an absence of playback log messages is expected. To follow errors live:
 
 ```bash
 journalctl --user -u speaker-keepalive.service -f
@@ -93,7 +95,7 @@ journalctl --user -u speaker-keepalive.service -f
 
 Ctrl+C here stops the log viewer, not the service. The service restarts after
 unexpected process failure with a ten-second delay. The application handles
-transient audio errors on its existing pulse schedule; it does not require
+transient audio errors with a thirty-second continuous-stream retry delay; it does not require
 PipeWire to be ready at a particular login ordering point.
 
 ### Stop, disable, and verify
@@ -128,9 +130,9 @@ setup entirely, disable it first, remove the installed unit and executable,
 then run `systemctl --user daemon-reload` again.
 
 After enabling, log out and back in when convenient and verify `active (running)`
-again. Actual login startup, systemd restart after failure, and live child
-cleanup remain pending desktop-session checks; they are not established by the
-fake-backend tests. See [SK-07](docs/tickets/SK-07.md) for verification limits.
+again. Native unit verification and live child cleanup passed during SK-08.
+Actual login startup and systemd restart after failure remain pending observed
+checks. See [SK-08](docs/tickets/SK-08.md) for current evidence and limits.
 
 ## CLI contract
 
@@ -148,6 +150,12 @@ Each command above plays one pulse and exits. For periodic playback until Ctrl+C
 ./target/release/speaker-keepalive run --interval 30 --duration 300 --frequency 100 --volume 0.0005
 ```
 
+For a continuous quiet tone until Ctrl+C (the login service's experiment):
+
+```bash
+./target/release/speaker-keepalive run --mode tone --frequency 100 --volume 0.0005
+```
+
 For a continuous digital-silence stream until Ctrl+C:
 
 ```bash
@@ -159,19 +167,20 @@ parameters, each periodic attempt/result, bounded backend diagnostics, and
 completion timing. Normal successful
 playback is quiet. Unknown options, duplicate settings, malformed values, and
 invalid ranges exit 2. Startup and one-shot backend failures exit 1.
-Both run modes retry transient backend failures as described below.
+All run modes retry transient backend failures as described below.
 Successful one-shot playback, handled Ctrl+C, and help/version exit 0.
 
 | Option | Default | Accepted values |
 | --- | --- | --- |
-| `run --mode` | `pulse` | `pulse` or `silence` |
+| `run --mode` | `pulse` | `pulse`, `tone`, or `silence` |
 | `run --interval` | 30 seconds | Integer 1–3600 seconds |
 | `--duration` | 300 milliseconds | Integer 20–5000 milliseconds |
 | `--frequency` | 100 Hz | Finite 20–1000 Hz, below Nyquist |
 | `--volume` | 0.0005 | Finite PCM peak amplitude 0–0.05, including zero |
 
 For pulse `run`, duration must be strictly shorter than interval. `test` accepts
-only signal options and `--verbose`, not `--interval` or `--mode`. Silence mode
+only signal options and `--verbose`, not `--interval` or `--mode`. Tone mode
+accepts frequency and volume but rejects explicit interval and duration settings. Silence mode
 rejects explicitly supplied interval, duration, frequency, and volume settings,
 even if they equal defaults or zero. No configuration file is loaded.
 
@@ -201,12 +210,13 @@ and [native-endian audio format aliases](https://github.com/PipeWire/pipewire/bl
 The installed tool's help, format list, and non-playing argument check were also
 verified. No WAV file or recurring audio-file writes are used.
 
-Both modes and `test` set `application.id=speaker-keepalive` and
+All modes and `test` set `application.id=speaker-keepalive` and
 `application.name=speaker-keepalive` for inspection and future activity exclusion.
 The installed tool advertises `--properties`; its
 [documented JSON stream properties](https://docs.pipewire.org/1.4/page_man_pw-cat_1.html)
 and [application ID key](https://docs.pipewire.org/1.4/group__pw__keys.html)
-are used. Live stream inspection is still pending.
+are used. SK-08 live inspection confirmed one running tone stream and two active
+links to the JBL; that does not establish physical keepalive effectiveness.
 
 ## Subprocess behavior
 
@@ -245,6 +255,38 @@ Normal success is quiet. First and changed failures are logged immediately;
 identical failures are summarized at most once per minute, with suppressed
 counts. Recovery is logged once. `--verbose` reports every attempt and result.
 
+## Continuous quiet tone
+
+Tone mode keeps one `pw-play` child open, generating 2048-frame chunks of
+48 kHz stereo native-endian `f32` PCM in a fixed 16 KiB buffer. Frequency defaults
+to 100 Hz and PCM peak amplitude to 0.0005, with the same limits as pulses.
+Both channels match. Oscillator phase carries across chunks, including for
+non-integer frequencies; the buffer is refilled only after every byte is written.
+A 10 ms fade-in occurs once on each stream start, with no recurring fades or gaps.
+Zero amplitude produces exact digital silence. Stream volume stays at unity.
+
+Backpressure paces generation. There is no growing queue, lifetime sample counter,
+audio file, or overall stream deadline. Cancellation uses the existing bounded
+child cleanup rather than waiting to drain a final audio fade. Failures and stalls
+use the same watchdog, thirty-second retry, and diagnostics as silence below.
+Backend failure/reconnection can therefore still interrupt a continuous stream.
+
+For the physical trial, keep the computer awake, JBL selected as output, and
+system/speaker volume unchanged. Observe for at least one hour, extending beyond
+the latest observed shutdown time if longer. Record power state, artifacts,
+service failures and resource use in the worksheet. Software checks cannot prove
+that the signal reached the JBL or kept it awake.
+
+To roll the installed service back to pulses, edit its `ExecStart` to
+`"%h/.local/bin/speaker-keepalive" run`, then run:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart speaker-keepalive.service
+```
+
+Keep only one instance running. Rollback restarts playback with the pulse defaults.
+
 ## Continuous silence
 
 Silence mode holds one playback child open and repeatedly sends a fixed 16 KiB
@@ -269,6 +311,9 @@ pulse streams may behave
 differently with Bluetooth, and startup latency may consume part of a short pulse.
 
 ## Physical experiment procedure
+
+This is the original pulse/silence comparison procedure. For the current tone
+trial, use the continuous-tone section above and the worksheet follow-up.
 
 Use [the validation worksheet](docs/hardware-validation.md) to record settings,
 routing, baseline and trial durations, power state, audible artifacts, cleanup,
@@ -333,10 +378,10 @@ The user reported that default pulses kept the JBL on beyond its usual timeout,
 with no reported artifacts and visually negligible resource use. Exact CPU/RSS
 and child/backend overhead remain unmeasured. Near-zero idle CPU and roughly
 10–20 MB parent RSS remain goals, not numerical results. The user authorized
-bringing forward the minimal login service in SK-07; further milestones still
-require explicit authorization.
+the minimal login service in SK-07 and the continuous-tone experiment in SK-08.
+Other milestones remain deferred.
 
 The [SK-05 handoff](docs/tickets/SK-05.md) records the release checks and complete
 Milestone 1 requirement review. Configuration files, device discovery, activity
 detection, and a status CLI remain deferred. The minimal user service above is
-the separately authorized SK-07 addition.
+the separately authorized SK-07 addition, updated for the SK-08 tone trial.

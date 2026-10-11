@@ -7,6 +7,72 @@ pub const DEFAULT_DURATION_MS: u64 = 300;
 pub const DEFAULT_FREQUENCY_HZ: f64 = 100.0;
 pub const DEFAULT_AMPLITUDE: f64 = 0.0005;
 
+/// Validated settings for an unbounded sine stream.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ToneParameters {
+    frequency_hz: f64,
+    amplitude: f64,
+}
+
+impl ToneParameters {
+    pub fn new(frequency_hz: f64, amplitude: f64) -> Result<Self, String> {
+        validate_signal(frequency_hz, amplitude)?;
+        Ok(Self {
+            frequency_hz,
+            amplitude,
+        })
+    }
+
+    pub fn generator(self) -> ToneGenerator {
+        ToneGenerator {
+            signal: self,
+            phase: 0.0,
+            fade_frame: 0,
+        }
+    }
+}
+
+/// Bounded oscillator state: phase wraps each cycle; the fade counter saturates.
+pub struct ToneGenerator {
+    signal: ToneParameters,
+    phase: f64,
+    fade_frame: usize,
+}
+
+impl ToneGenerator {
+    pub fn fill_pcm(&mut self, bytes: &mut [u8]) {
+        assert_eq!(bytes.len() % (CHANNELS * size_of::<f32>()), 0);
+        let fade_frames = SAMPLE_RATE as usize / 100;
+        let step = TAU * self.signal.frequency_hz / f64::from(SAMPLE_RATE);
+        for frame in bytes.chunks_exact_mut(CHANNELS * size_of::<f32>()) {
+            let sample = if self.signal.amplitude == 0.0 {
+                0.0_f32
+            } else {
+                (self.phase.sin() * self.signal.amplitude * self.fade_frame as f64
+                    / fade_frames as f64) as f32
+            };
+            for channel in frame.chunks_exact_mut(size_of::<f32>()) {
+                channel.copy_from_slice(&sample.to_ne_bytes());
+            }
+            self.phase = (self.phase + step) % TAU;
+            self.fade_frame = (self.fade_frame + 1).min(fade_frames);
+        }
+    }
+}
+
+fn validate_signal(frequency_hz: f64, amplitude: f64) -> Result<(), String> {
+    if !frequency_hz.is_finite()
+        || !(20.0..=1000.0).contains(&frequency_hz)
+        || frequency_hz >= f64::from(SAMPLE_RATE) / 2.0
+    {
+        return Err("--frequency must be finite, between 20 and 1000 Hz, and below Nyquist".into());
+    }
+    if !amplitude.is_finite() || !(0.0..=0.05).contains(&amplitude) {
+        return Err("--volume must be a finite PCM peak amplitude between 0 and 0.05".into());
+    }
+    Ok(())
+}
+
 /// Validated signal settings. Amplitude is PCM peak relative to full scale,
 /// not the system, speaker, or PipeWire stream volume.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -21,17 +87,7 @@ impl PulseParameters {
         if !(20..=5000).contains(&duration_ms) {
             return Err("--duration must be an integer between 20 and 5000 milliseconds".into());
         }
-        if !frequency_hz.is_finite()
-            || !(20.0..=1000.0).contains(&frequency_hz)
-            || frequency_hz >= f64::from(SAMPLE_RATE) / 2.0
-        {
-            return Err(
-                "--frequency must be finite, between 20 and 1000 Hz, and below Nyquist".into(),
-            );
-        }
-        if !amplitude.is_finite() || !(0.0..=0.05).contains(&amplitude) {
-            return Err("--volume must be a finite PCM peak amplitude between 0 and 0.05".into());
-        }
+        validate_signal(frequency_hz, amplitude)?;
         Ok(Self {
             duration_ms,
             frequency_hz,

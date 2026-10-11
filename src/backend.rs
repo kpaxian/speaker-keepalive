@@ -1,16 +1,16 @@
-//! Bounded PipeWire playback for pulses and continuous silence.
+//! Bounded PipeWire playback for pulses, continuous tones, and silence.
 
+mod continuous;
 mod diagnostics;
 mod periodic;
 mod process;
-mod silence;
 
 use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use crate::audio::{PulseParameters, CHANNELS, SAMPLE_RATE};
+use crate::audio::{PulseParameters, ToneParameters, CHANNELS, SAMPLE_RATE};
 use process::{Cancellation, Limits};
 
 const STREAM_PROPERTIES: &str =
@@ -177,7 +177,14 @@ pub fn run_silence(verbose: bool) -> io::Result<()> {
     let cancellation = Cancellation::install()?;
     let backend = Backend::new("pw-play");
     backend.check(&cancellation)?;
-    silence::run(&backend, verbose, &cancellation)
+    continuous::run(&backend, None, verbose, &cancellation)
+}
+
+pub fn run_tone(signal: ToneParameters, verbose: bool) -> io::Result<()> {
+    let cancellation = Cancellation::install()?;
+    let backend = Backend::new("pw-play");
+    backend.check(&cancellation)?;
+    continuous::run(&backend, Some(signal), verbose, &cancellation)
 }
 
 #[cfg(test)]

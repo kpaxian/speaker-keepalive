@@ -87,6 +87,21 @@ if case == "flood":
     for _ in range(256):
         os.write(2, b"X" * 4096)
 
+if case == "tone-slow":
+    total = 0
+    with (root / "audio.pcm").open("wb") as captured:
+        while True:
+            block = os.read(0, 4093)
+            if not block:
+                sys.exit(0)
+            if total < 131072:
+                captured.write(block[:131072 - total])
+            total += len(block)
+            if total >= 131072 and not (root / "tone-captured").exists():
+                captured.flush()
+                (root / "tone-captured").write_text("ready")
+            time.sleep(0.005)
+
 if case == "silence-slow":
     total = 0
     while True:

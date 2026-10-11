@@ -1,5 +1,15 @@
 # Bluetooth Speaker Keepalive — Implementation Specification
 
+## Authorized amendment — 2026-10-07
+
+Following intermittent shutdowns after the earlier pulse trial, the user approved
+SK-08: add `run --mode tone` and use it in the login service at 100 Hz and amplitude
+0.0005. This mode uses a continuous phase-coherent sine stream, a single startup
+fade, bounded buffers and existing cleanup/retry behavior. It accepts frequency
+and volume; explicit interval/duration options are invalid. Plain `run` retains
+pulse defaults and silence mode remains available. No device discovery or other
+later milestone is authorized by this amendment. Physical efficacy is pending.
+
 ## 1. Goal and environment
 
 Build a small Rust CLI utility for Fedora Linux with PipeWire, WirePlumber and systemd user services. It should prevent a **JBL Charge Essential 2** Bluetooth speaker from switching off while idle, with minimal resource use.

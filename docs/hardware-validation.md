@@ -1,6 +1,11 @@
 # Hardware validation worksheet — SK-06
 
-**Result: default pulse feasibility supported by user observation.** The user
+**Current experiment: continuous tone; physical result pending.** On 2026-10-07,
+the user reported that the speaker still shuts off without a clear pattern and
+selected continuous 100 Hz / 0.0005 playback through the login service for the
+next trial. This does not establish the cause of shutdowns.
+
+**Earlier result: default pulse feasibility supported by user observation.** The user
 reported 1650.000 seconds (27½ minutes) with the JBL still on, confirmed this
 exceeded its usual idle timeout from personal experience, reported no artifacts,
 and described resource use as visually negligible. The parent stopped after
@@ -10,6 +15,27 @@ Follow the [README procedure](../README.md#physical-experiment-procedure).
 Run only one keepalive instance, with the JBL selected as default output, and
 stop before changing outputs. Commands below are for the user-led session;
 creating this worksheet did not run them against a physical speaker.
+
+## Continuous-tone follow-up — 2026-10-07
+
+Use `run --mode tone --frequency 100 --volume 0.0005` through the updated service.
+Keep only one instance, verify its route to the JBL, leave system/speaker volume
+unchanged, and keep the computer awake. Plan at least one hour, extending beyond
+the latest observed shutdown time if longer. Record interruptions separately from
+healthy continuous playback; transport progress alone is not hardware success.
+
+| Observation | Result |
+| --- | --- |
+| Start/end time and elapsed duration | Started 2026-10-07 19:22:11 EEST after cleanup verification; end/duration pending |
+| Latest pulse-mode shutdown time, if known | No consistent pattern reported |
+| JBL route and mute/volume state | Running keepalive node 78; active stereo links 79 and 74 to JBL Charge Essential 2; default sink volume 0.24, not muted, unchanged |
+| Speaker stayed powered on | Pending user observation |
+| Audible tone, clicks, or other artifacts | Pending user observation |
+| Stream failures/restarts during trial | None in initial journal check; longer trial pending |
+| Parent, playback-child, and backend CPU/RSS | Initial ps snapshot: parent 3440 KiB RSS / 0.4% lifetime CPU; child 8480 KiB / 0.0% rounded CPU. Not a steady-state measurement; backend comparison pending |
+| Stop leaves no parent or playback child | Passed before final trial start: PIDs 33788 and 33799 both absent after systemctl stop; restarted as parent 34382 / child 34386 |
+
+Retain the original pulse observations below; this is a separate experiment.
 
 ## Setup and baseline
 

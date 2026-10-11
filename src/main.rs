@@ -16,6 +16,7 @@ fn main() -> ExitCode {
         Operation::Test(signal) => backend::play_once(&signal.generate(), verbose),
         Operation::RunPulse { interval, signal } => backend::run_pulses(&signal, interval, verbose),
         Operation::RunSilence => backend::run_silence(verbose),
+        Operation::RunTone(signal) => backend::run_tone(signal, verbose),
     };
 
     match result {

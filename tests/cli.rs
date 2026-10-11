@@ -315,15 +315,77 @@ fn periodic_failure_retries_then_reports_recovery() {
 }
 
 fn start_silence(fixture: &Fixture) -> ChildGuard {
+    start_continuous(fixture, "silence")
+}
+
+fn start_continuous(fixture: &Fixture, mode: &str) -> ChildGuard {
     ChildGuard(Some(
         with_backend(fixture)
-            .args(["run", "--mode", "silence"])
+            .args(["run", "--mode", mode])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap(),
     ))
+}
+
+#[test]
+fn tone_stream_is_seamless_through_partial_writes_and_stops_cleanly() {
+    for (extra, frequency, amplitude) in [
+        (vec![], 100.0, 0.0005),
+        (
+            vec!["--frequency", "137.25", "--volume", "0.001"],
+            137.25,
+            0.001,
+        ),
+        (vec!["--volume", "0"], 100.0, 0.0),
+    ] {
+        let fixture = Fixture::new("tone-slow");
+        let mut child = ChildGuard(Some(
+            with_backend(&fixture)
+                .args(["run", "--mode", "tone"])
+                .args(extra)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+        wait_for_file(&fixture.directory.join("tone-captured"));
+        assert!(child.0.as_mut().unwrap().try_wait().unwrap().is_none());
+        let output = stop_run(&mut child);
+        assert!(
+            output.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let bytes = fs::read(fixture.directory.join("audio.pcm")).unwrap();
+        assert_eq!(bytes.len(), 131072);
+        for (index, frame) in bytes.chunks_exact(8).enumerate() {
+            let left = f32::from_ne_bytes(frame[..4].try_into().unwrap());
+            let right = f32::from_ne_bytes(frame[4..].try_into().unwrap());
+            let fade = (index as f64 / 480.0).min(1.0);
+            let expected = (std::f64::consts::TAU * frequency * index as f64 / 48000.0).sin()
+                * amplitude
+                * fade;
+            assert_eq!(left, right);
+            assert!(
+                (f64::from(left) - expected).abs() < 1e-9,
+                "frame {index}: {left} != {expected}"
+            );
+            if amplitude == 0.0 {
+                assert_eq!(left.to_bits(), 0);
+            }
+        }
+        assert_eq!(
+            fs::read_to_string(fixture.directory.join("starts"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        fixture.assert_reaped();
+    }
 }
 
 #[test]
@@ -358,48 +420,74 @@ fn silence_uses_one_persistent_zero_stream_and_stops_under_backpressure() {
 }
 
 #[test]
-fn silence_restart_wait_is_interruptible() {
-    let fixture = Fixture::new("reject-playback");
-    let mut child = start_silence(&fixture);
-    wait_for_file(&fixture.directory.join("finishes"));
-    std::thread::sleep(Duration::from_millis(200));
-    let output = stop_run(&mut child);
-    assert!(String::from_utf8_lossy(&output.stderr).contains("restarting silence in 30 seconds"));
-    assert_eq!(
-        fs::read_to_string(fixture.directory.join("starts"))
-            .unwrap()
-            .lines()
-            .count(),
-        1
-    );
-    fixture.assert_reaped();
+fn continuous_restart_wait_is_interruptible() {
+    for mode in ["silence", "tone"] {
+        let fixture = Fixture::new("reject-playback");
+        let mut child = start_continuous(&fixture, mode);
+        wait_for_file(&fixture.directory.join("finishes"));
+        std::thread::sleep(Duration::from_millis(200));
+        let output = stop_run(&mut child);
+        assert!(String::from_utf8_lossy(&output.stderr)
+            .contains(&format!("restarting {mode} in 30 seconds")));
+        assert_eq!(
+            fs::read_to_string(fixture.directory.join("starts"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        fixture.assert_reaped();
+    }
 }
 
 #[test]
-fn silence_restart_obeys_real_thirty_second_delay_and_reaps_old_child() {
-    let fixture = Fixture::new("early-exit");
-    let mut child = start_silence(&fixture);
-    let finishes = wait_for_lines(&fixture, "finishes", 1);
-    // The next invocation will stay alive, proving the restart can resume streaming.
-    fs::write(fixture.directory.join("case"), "silence-slow").unwrap();
-    let started = Instant::now();
-    let starts = loop {
-        let content = fs::read_to_string(fixture.directory.join("starts")).unwrap();
-        let lines: Vec<f64> = content.lines().map(|s| s.parse().unwrap()).collect();
-        if lines.len() >= 2 {
-            break lines;
-        }
-        assert!(
-            started.elapsed() < Duration::from_secs(35),
-            "silence stream did not restart"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    assert!(starts[1] - finishes[0].parse::<f64>().unwrap() >= 30.0);
-    wait_for_file(&fixture.directory.join("zero-verified"));
+fn continuous_restart_obeys_real_thirty_second_delay_and_reaps_old_child() {
+    for mode in ["silence", "tone"] {
+        let fixture = Fixture::new("early-exit");
+        let mut child = start_continuous(&fixture, mode);
+        let finishes = wait_for_lines(&fixture, "finishes", 1);
+        // The next invocation will stay alive, proving the restart can resume streaming.
+        fs::write(
+            fixture.directory.join("case"),
+            if mode == "silence" {
+                "silence-slow"
+            } else {
+                "tone-slow"
+            },
+        )
+        .unwrap();
+        let started = Instant::now();
+        let starts = loop {
+            let content = fs::read_to_string(fixture.directory.join("starts")).unwrap();
+            let lines: Vec<f64> = content.lines().map(|s| s.parse().unwrap()).collect();
+            if lines.len() >= 2 {
+                break lines;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(35),
+                "silence stream did not restart"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert!(starts[1] - finishes[0].parse::<f64>().unwrap() >= 30.0);
+        wait_for_file(&fixture.directory.join(if mode == "silence" {
+            "zero-verified"
+        } else {
+            "tone-captured"
+        }));
+        stop_run(&mut child);
+        assert!(!fixture.directory.join("overlap").exists());
+        let calls = fs::read_to_string(fixture.directory.join("calls")).unwrap();
+        assert_eq!(calls.lines().filter(|line| *line == "--help").count(), 1);
+        fixture.assert_reaped();
+    }
+}
+
+#[test]
+fn tone_cancels_stalled_child_even_when_it_ignores_term() {
+    let fixture = Fixture::new("ignore-term");
+    let mut child = start_continuous(&fixture, "tone");
+    wait_for_file(&fixture.directory.join("ready"));
     stop_run(&mut child);
-    assert!(!fixture.directory.join("overlap").exists());
-    let calls = fs::read_to_string(fixture.directory.join("calls")).unwrap();
-    assert_eq!(calls.lines().filter(|line| *line == "--help").count(), 1);
     fixture.assert_reaped();
 }

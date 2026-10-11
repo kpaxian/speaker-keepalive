@@ -150,6 +150,11 @@ pub(super) enum Input<'a> {
         buffer: &'a [u8],
         progress: &'a mut dyn FnMut(),
     },
+    Generated {
+        buffer: &'a mut [u8],
+        refill: &'a mut dyn FnMut(&mut [u8]),
+        progress: &'a mut dyn FnMut(),
+    },
 }
 
 pub(super) fn execute_input(
@@ -159,7 +164,11 @@ pub(super) fn execute_input(
     cancellation: &Cancellation,
     limits: Limits,
 ) -> io::Result<Captured> {
-    if matches!(&input, Some(Input::Repeat { buffer, .. }) if buffer.is_empty()) {
+    if match &input {
+        Some(Input::Repeat { buffer, .. }) => buffer.is_empty(),
+        Some(Input::Generated { buffer, .. }) => buffer.is_empty(),
+        _ => false,
+    } {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "repeating input must not be empty",
@@ -167,6 +176,9 @@ pub(super) fn execute_input(
     }
     if cancellation.is_cancelled() {
         return Err(cancelled());
+    }
+    if let Some(Input::Generated { buffer, refill, .. }) = &mut input {
+        refill(buffer);
     }
     let mut process = RunningChild::spawn(command, input.is_some(), capture_stdout)?;
     let result = process.transfer(&mut input, cancellation, limits);
@@ -237,7 +249,7 @@ impl RunningChild {
         cancellation: &Cancellation,
         limits: Limits,
     ) -> io::Result<()> {
-        let repeating = matches!(input, Some(Input::Repeat { .. }));
+        let repeating = matches!(input, Some(Input::Repeat { .. } | Input::Generated { .. }));
         let started = Instant::now();
         let mut last_write = started;
         let mut written = 0;
@@ -264,6 +276,7 @@ impl RunningChild {
             let bytes = match input {
                 Some(Input::Finite(bytes)) => *bytes,
                 Some(Input::Repeat { buffer, .. }) => *buffer,
+                Some(Input::Generated { buffer, .. }) => &**buffer,
                 None => &[],
             };
             self.drain_output()?;
@@ -318,13 +331,19 @@ impl RunningChild {
                 }
                 if written == bytes.len() {
                     if repeating {
+                        if let Some(Input::Generated { buffer, refill, .. }) = input {
+                            refill(buffer);
+                        }
                         written = 0;
                     } else {
                         self.stdin.take();
                     }
                 }
                 if progressed {
-                    if let Some(Input::Repeat { progress, .. }) = input {
+                    if let Some(
+                        Input::Repeat { progress, .. } | Input::Generated { progress, .. },
+                    ) = input
+                    {
                         progress();
                     }
                 }
